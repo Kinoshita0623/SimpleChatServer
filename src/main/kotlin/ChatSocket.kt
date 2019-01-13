@@ -3,17 +3,22 @@ import org.eclipse.jetty.websocket.api.Session
 import org.eclipse.jetty.websocket.api.annotations.OnWebSocketClose
 import org.eclipse.jetty.websocket.api.annotations.OnWebSocketConnect
 import org.eclipse.jetty.websocket.api.annotations.OnWebSocketMessage
+import org.eclipse.jetty.websocket.api.annotations.WebSocket
 import java.util.*
+import kotlin.collections.HashSet
 
+@WebSocket
 class ChatSocket{
     companion object{
-        private val usersCache = HashMap<Session, String/*ランダムなUUIDが入る*/>()
+        //private val usersCache = HashMap<Session, String/*ランダムなUUIDが入る*/>()
+        private val usersCache = Collections.synchronizedSet(HashSet<Session>())
     }
 
     private val gson = Gson()
 
     @OnWebSocketConnect
     fun connected(session: Session){
+        println("接続中のデバイス数 ${usersCache.size}")
         synchronized(usersCache){
             addUsersCache(session)
         }
@@ -21,6 +26,7 @@ class ChatSocket{
 
     @OnWebSocketClose
     fun closed(session: Session, status: Int, reason: String){
+        println("接続中のデバイス数 ${usersCache.size}")
         synchronized(usersCache){
             usersCache.remove(session)
         }
@@ -28,29 +34,28 @@ class ChatSocket{
 
     @OnWebSocketMessage
     fun message(session: Session, message: String){
-        val obj = gson.fromJson(message, ReceiveMessageBean::class.java)
-        val randomId = usersCache[session]
-        val responseData = if(randomId == null){
-            val uuid = addUsersCache(session)
-            SendMessageBean(uuid, obj.message, name = obj.name)
+        println("接続中のデバイス数 ${usersCache.size}")
+        val obj = gson.fromJson(message, MessageBean::class.java)
 
-        }else{
-            SendMessageBean(randomId, obj.message, name = obj.name)
-        }
-        responseMessage(responseData = responseData)
+        responseMessage(responseData = obj)
 
     }
-    private fun addUsersCache(session: Session): String/*生成したUUIDを返す*/{
-        val uuid = UUID.randomUUID().toString()
+    private fun addUsersCache(session: Session){
         synchronized(usersCache){
-            usersCache[session] = uuid
+            usersCache.remove(session)
+            usersCache.add(session)
         }
-        return uuid
     }
 
-    private fun responseMessage(responseData: SendMessageBean, sessionMap: HashMap<Session, String> = usersCache){
-        sessionMap.forEach { session, _ ->
-            session.remote.sendString(gson.toJson(responseData))
+    private fun responseMessage(responseData: MessageBean, cacheList: Set<Session> = usersCache){
+        synchronized(usersCache){
+            cacheList.forEach{
+                if(it.isOpen){
+                    it.remote.sendString(gson.toJson(responseData))
+
+                }
+            }
         }
+
     }
 }
